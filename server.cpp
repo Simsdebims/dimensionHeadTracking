@@ -90,8 +90,9 @@ Server::Server(int port) {
     info.uid = -1;
     info.user = &trackingData;
 
-    context = lws_create_context(&info);
+    lws_set_log_level(LLL_WARN, NULL);
 
+    context = lws_create_context(&info);
 }
 
 Server::~Server() {
