@@ -213,12 +213,14 @@ int main() {
         cv::Mat rgb;
         cv::cvtColor(colorImage, rgb, CV_RGBA2RGB);
 
+/*
         cv::imshow("Color", colorImage);
         cv::imshow("Color2", rgb);
         cv::imshow("Registered", registeredImage);
         cv::imshow("Depth", depthImage / 4096.0f);
         cv::imshow("depth2rgb", depth2rgbImage / 4096.0f);
         cv::waitKey(1);
+*/
 
 
         if (!calibrated) {
