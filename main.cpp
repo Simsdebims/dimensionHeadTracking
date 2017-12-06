@@ -18,6 +18,10 @@ using namespace libfreenect2;
 typedef Freenect2Device::IrCameraParams DepthCameraParams;
 typedef Freenect2Device::ColorCameraParams ColorCameraParams;
 
+bool running = true;
+bool calibrated = false;
+cv::Ptr<cv::aruco::Dictionary> dict = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_50);
+
 struct TrackingBox {
 
     TrackingBox(string id, float minX, float maxX, float minY, float maxY, float minZ, float maxZ) :
@@ -101,7 +105,6 @@ findTransformation(cv::Mat& colorImage, cv::Mat& registeredDepthImage, DepthCame
 
     // Find markers in rgb image
 
-    cv::Ptr<cv::aruco::Dictionary> dict = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_50);
     vector<vector<cv::Point2f>> corners;
     vector<int> ids;
 
@@ -115,6 +118,7 @@ findTransformation(cv::Mat& colorImage, cv::Mat& registeredDepthImage, DepthCame
 
     vector<cv::Point3f> markers;
     for (int i = 0; i < 4; ++i) {
+        if (ids[i] > 3) return false;
         int c = i == 0 ? 3 : i - 1;
         int u = (int) corners[i][c].x;
         int v = (int) corners[i][c].y;
@@ -159,9 +163,6 @@ findTransformation(cv::Mat& colorImage, cv::Mat& registeredDepthImage, DepthCame
     return true;
 }
 
-
-bool running = true;
-bool calibrated = false;
 
 void siginthandler(int s) {
     running = false;
@@ -269,12 +270,12 @@ int main() {
         //cv::imshow("Color", colorImage);
         // cv::imshow("Color2", rgb);
         cv::imshow("Registered", registeredImage);
-        //cv::imshow("Depth", depthImage / 4096.0f);
+        cv::imshow("Depth", depthImage / 4096.0f);
         // cv::imshow("depth2rgb", depth2rgbImage / 4096.0f);
         cv::waitKey(1);
 
         if (!calibrated) {
-            cout << "Searching for markers" << endl;
+            //cout << "Searching for markers" << endl;
             calibrated = findTransformation(rgb, mappedDepth, depthParams, transformation);
             listener.release(frames);
             continue;
