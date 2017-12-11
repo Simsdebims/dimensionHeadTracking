@@ -16,3 +16,4 @@ add_executable(dimensionHeadTracking ${SOURCE_FILES})
 target_link_libraries(dimensionHeadTracking ${freenect2_LIBRARIES} ${OpenCV_LIBS}  ${LIB_WEBSOCKETS_LIBRARIES})
 
 file(COPY websocket.html DESTINATION .)
+file(COPY calib_data DESTINATION .)

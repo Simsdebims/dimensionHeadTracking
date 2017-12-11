@@ -21,6 +21,8 @@ typedef Freenect2Device::ColorCameraParams ColorCameraParams;
 bool running = true;
 bool calibrated = false;
 cv::Ptr<cv::aruco::Dictionary> dict = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_50);
+cv::Mat colorCamMat;
+cv::Mat colorDistCoeffs;
 
 struct TrackingBox {
 
@@ -100,8 +102,7 @@ void transformAndSplit(Frame* depthFrame, DepthCameraParams& params, cv::Affine3
 }
 
 bool
-findTransformation(cv::Mat& colorImage, cv::Mat& registeredDepthImage, DepthCameraParams& depthParams,
-                   cv::Affine3f& result) {
+findTransformation(cv::Mat& colorImage, cv::Mat& cameraMatrix, cv::Mat distCoeffs, float markerLength, cv::Affine3f& result) {
 
     // Find markers in rgb image
 
@@ -114,50 +115,24 @@ findTransformation(cv::Mat& colorImage, cv::Mat& registeredDepthImage, DepthCame
 
     cout << "Found markers." << endl;
 
-    // Get 3D points for markers from depth data
+    cv::aruco::drawDetectedMarkers(colorImage, corners, ids);
+    cv::imshow("markers", colorImage);
 
-    vector<cv::Point3f> markers;
-    for (int i = 0; i < 4; ++i) {
-        if (ids[i] > 3) return false;
-        int c = i == 0 ? 3 : i - 1;
-        int u = (int) corners[i][c].x;
-        int v = (int) corners[i][c].y;
-        float d = registeredDepthImage.at<float>(v, u);
-        if (d <= 0.0f || d > 10000.0f) return false;
-        markers.push_back(unprojectPoint(d, u, v, depthParams));
+    vector<cv::Vec3d> tvecs, rvecs;
+    cv::aruco::estimatePoseSingleMarkers(corners, markerLength, cameraMatrix, distCoeffs, rvecs, tvecs);
+
+    cv::Vec3f translation(0.0f,0.0f,0.0f);
+    for (auto& t: tvecs) {
+        translation += t;
     }
+    translation /= (float) tvecs.size();
 
-    for (auto& p : markers) {
-        cout << p << endl;
-        cv::aruco::drawDetectedMarkers(colorImage, corners, ids);
-        cv::aruco::drawDetectedMarkers(registeredDepthImage, corners, ids);
-    }
+    // TODO: average rotations?
 
-    cv::imshow("markers1", colorImage);
-    cv::imshow("markers2", registeredDepthImage / 4096.0f);
+    result.rotation(rvecs[0]);
+    result.translation(translation);
 
-
-
-    // Compute transformation for center point
-
-    cv::Point3f from = (markers[0] + markers[1] + markers[2] + markers[3]) / 4.0f;
-    cv::Vec3f dir = cv::normalize(cv::Vec3f(markers[2] - markers[1]));
-    cv::Vec3f up = dir.cross(markers[0] - markers[1]);
-
-    dir = cv::normalize(dir);
-    cv::Vec3f right = up.cross(dir);
-    right = cv::normalize(right);
-    cv::Vec3f newup = dir.cross(right);
-
-    // Create transformation matrix
-
-    cv::Matx44f transform = cv::Matx44f::eye();
-    vector<cv::Vec3f> m = {right, newup, dir};
-    cv::Mat3f r(m);
-    result.rotation(cv::Matx33f((float*) r.ptr()).t());
-    result.translation(from);
-
-    cout << "Success. Transformation: " << endl;
+    cout << "Camera transformation:" << endl;
     cout << result.matrix << endl;
 
     return true;
@@ -166,6 +141,21 @@ findTransformation(cv::Mat& colorImage, cv::Mat& registeredDepthImage, DepthCame
 
 void siginthandler(int s) {
     running = false;
+}
+
+void loadCalibration(string serial, cv::Mat& cameraMat, cv::Mat& distCoeffs) {
+    string filenName = "calib_data/" + serial + "/calib_color.yaml";
+    cv::FileStorage fs(filenName, cv::FileStorage::READ);
+
+    if (!fs.isOpened()) {
+        cerr << "Could not open calibration file " << filenName << endl;
+        return;
+    }
+
+    fs["cameraMatrix"] >> cameraMat;
+    fs["distortionCoefficients"] >> distCoeffs;
+
+    fs.release();
 }
 
 int main() {
@@ -203,6 +193,8 @@ int main() {
 
     DepthCameraParams depthParams = dev->getIrCameraParams();
     ColorCameraParams colorParams = dev->getColorCameraParams();
+    loadCalibration(serial, colorCamMat, colorDistCoeffs); // TODO
+
 
     Registration* registration = new Registration(depthParams, colorParams);
     Frame undistorted(512, 424, 4);
@@ -263,25 +255,20 @@ int main() {
         cv::Mat depth2rgbImage(depth2rgb.height, depth2rgb.width, CV_32FC1, depth2rgb.data);
 
         cv::Mat rgb, mappedDepth;
-        cv::cvtColor(registeredImage, rgb, CV_RGBA2RGB);
+        cv::cvtColor(colorImage, rgb, CV_RGBA2RGB);
         cv::flip(rgb, rgb, 1);
-        cv::flip(undistortedImage, mappedDepth, 1);
+        cv::flip(depth2rgbImage, mappedDepth, 1);
 
-        //cv::imshow("Color", colorImage);
-        // cv::imshow("Color2", rgb);
-        cv::imshow("Registered", registeredImage);
+
         cv::imshow("Depth", depthImage / 4096.0f);
-        // cv::imshow("depth2rgb", depth2rgbImage / 4096.0f);
+
         cv::waitKey(1);
 
         if (!calibrated) {
-            //cout << "Searching for markers" << endl;
-            calibrated = findTransformation(rgb, mappedDepth, depthParams, transformation);
+            calibrated = findTransformation(rgb, colorCamMat, colorDistCoeffs, 0.016f, transformation);
             listener.release(frames);
             continue;
         }
-
-        transformation.translation(cv::Vec3f(0, 1.5f, -1.5f));
 
         for (auto& b : boxes) b.reset();
 
