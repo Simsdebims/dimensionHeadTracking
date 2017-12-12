@@ -8,7 +8,6 @@
 
 #include <opencv2/opencv.hpp>
 #include <opencv2/aruco.hpp>
-//#include <opencv2/viz.hpp>
 
 #include "server.h"
 
@@ -26,7 +25,7 @@ bool calibrated = false;
 cv::Ptr<cv::aruco::Dictionary> dict = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_50);
 cv::Mat colorCamMat;
 cv::Mat colorDistCoeffs;
-cv::RNG rng( 12345 );
+cv::RNG rng( 2345);
 
 struct TrackingBox {
 
@@ -108,20 +107,28 @@ void transformAndSplit(Frame* depthFrame, DepthCameraParams& params, cv::Affine3
 bool
 findTransformation(cv::Mat& colorImage, cv::Mat& cameraMatrix, cv::Mat distCoeffs, float markerLength, cv::Affine3f& result) {
 
+    cv::Mat tmp;
+    cv::flip(colorImage, tmp, 1);
+
     // Find markers in rgb image
 
     vector<vector<cv::Point2f>> corners;
     vector<int> ids;
 
-    cv::aruco::detectMarkers(colorImage, dict, corners, ids);
+    cv::aruco::detectMarkers(tmp, dict, corners, ids);
 
     if (corners.size() < 4) return false;
 
+    int w = colorImage.cols;
+    int h = colorImage.rows;
     cout << "Found markers." << endl;
+    for (auto& a : corners) {
+        for (auto& c: a) {
+            c.x = w-c.x;
+        }
+    }
 
     cv::aruco::drawDetectedMarkers(colorImage, corners, ids);
-
-
 
 
     vector<cv::Vec3d> tvecs, rvecs;
@@ -262,20 +269,12 @@ int main() {
 
         Frame* depth = frames[Frame::Depth];
         Frame* color = frames[Frame::Color];
-        Frame* ir = frames[Frame::Ir];
-
-        registration->apply(color, depth, &undistorted, &registered, true, &depth2rgb);
 
         cv::Mat colorImage(color->height, color->width, CV_8UC4, color->data);
         cv::Mat depthImage(depth->height, depth->width, CV_32FC1, depth->data);
-        cv::Mat undistortedImage(depth->height, depth->width, CV_32FC1, depth->data);
-        cv::Mat registeredImage(registered.height, registered.width, CV_8UC4, registered.data);
-        cv::Mat depth2rgbImage(depth2rgb.height, depth2rgb.width, CV_32FC1, depth2rgb.data);
 
-        cv::Mat rgb, mappedDepth;
+        cv::Mat rgb;
         cv::cvtColor(colorImage, rgb, CV_RGBA2RGB);
-        cv::flip(rgb, rgb, 1);
-        cv::flip(depth2rgbImage, mappedDepth, 1);
 
 #ifdef VIS2D
         cv::imshow("Depth", depthImage / 4096.0f);
