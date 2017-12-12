@@ -12,6 +12,9 @@
 
 #include "server.h"
 
+#define VIS3D
+//#define VIS2D
+
 using namespace std;
 using namespace libfreenect2;
 
@@ -23,6 +26,7 @@ bool calibrated = false;
 cv::Ptr<cv::aruco::Dictionary> dict = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_50);
 cv::Mat colorCamMat;
 cv::Mat colorDistCoeffs;
+cv::RNG rng( 12345 );
 
 struct TrackingBox {
 
@@ -116,7 +120,9 @@ findTransformation(cv::Mat& colorImage, cv::Mat& cameraMatrix, cv::Mat distCoeff
     cout << "Found markers." << endl;
 
     cv::aruco::drawDetectedMarkers(colorImage, corners, ids);
-    cv::imshow("markers", colorImage);
+
+
+
 
     vector<cv::Vec3d> tvecs, rvecs;
     cv::aruco::estimatePoseSingleMarkers(corners, markerLength, cameraMatrix, distCoeffs, rvecs, tvecs);
@@ -126,6 +132,13 @@ findTransformation(cv::Mat& colorImage, cv::Mat& cameraMatrix, cv::Mat distCoeff
         translation += t;
     }
     translation /= (float) tvecs.size();
+
+
+    cv::aruco::drawAxis(colorImage, cameraMatrix, distCoeffs, rvecs[0], translation, 0.1f);
+
+#ifdef VIS2D
+   cv::imshow("markers", colorImage);
+#endif
 
     // TODO: average rotations?
 
@@ -175,8 +188,6 @@ int main() {
     PacketPipeline* pipeline = 0;
 
     pipeline = new libfreenect2::CudaPacketPipeline;
-//    pipeline = new libfreenect2::OpenGLPacketPipeline;
-//    pipeline = new libfreenect2::CpuPacketPipeline();
 
     dev = freenect2.openDevice(serial, pipeline);
 
@@ -225,16 +236,23 @@ int main() {
     boxes.push_back({"B3", 0.5f, 1.5f, 0.0f, 2.5f, -1.0f, 0.0f});
 
 
-    // Visualization
-//    cv::viz::Viz3d window3D("Viz");
-//    cv::viz::WPlane table_w(cv::Point3d(0, 0, 0), cv::Vec3d(0, 1, 0), cv::Vec3d(0, 0, 1), cv::Size2d(1, 2));
-//    window3D.showWidget("table", table_w);
-//    vector<cv::viz::WSphere> positions_w;
-//    for (auto& b: boxes) {
-//        cv::viz::WSphere s(cv::Point3d(0, 0, 0), 0.1);
-//        window3D.showWidget(b.id, s);
-//        positions_w.push_back(s);
-//    }
+#ifdef VIS3D
+    cv::viz::Viz3d window3D("Viz");
+    cv::viz::WPlane table_w(cv::Point3d(0, 0, 0), cv::Vec3d(0, 1, 0), cv::Vec3d(0, 0, 1), cv::Size2d(1, 2));
+    cv::viz::WCameraPosition origin_w;
+    cv::viz::WCameraPosition camera_w(cv::Vec2d(1.22, 1.04));
+    cv::viz::WPlane floor_w(cv::Point3d(0, -1, 0), cv::Vec3d(0, 1, 0), cv::Vec3d(0, 0, 1), cv::Size2d(5, 5), cv::viz::Color::gray());
+    window3D.showWidget("table", table_w);
+    window3D.showWidget("floor", floor_w);
+    window3D.showWidget("origin", origin_w);
+    window3D.showWidget("camera", camera_w);
+    vector<cv::viz::WSphere> positions_w;
+    for (auto& b: boxes) {
+        cv::viz::WSphere s(cv::Point3d(0, 0, 0), 0.1, 10, cv::viz::Color(rng(255), rng(255), rng(255)));
+        window3D.showWidget(b.id, s);
+        positions_w.push_back(s);
+    }
+#endif
 
     signal(SIGINT, siginthandler);
 
@@ -259,10 +277,10 @@ int main() {
         cv::flip(rgb, rgb, 1);
         cv::flip(depth2rgbImage, mappedDepth, 1);
 
-
+#ifdef VIS2D
         cv::imshow("Depth", depthImage / 4096.0f);
-
         cv::waitKey(1);
+#endif
 
         if (!calibrated) {
             calibrated = findTransformation(rgb, colorCamMat, colorDistCoeffs, 0.016f, transformation);
@@ -276,16 +294,17 @@ int main() {
 
         for (auto& b : boxes) b.refine();
 
-        // Visualization
-//        for (auto& b : boxes) {
-//            cv::Point3f pos = cv::Vec3f(b.top);
-//            if (pos == cv::Point3f()) continue;
-//            cv::Affine3d pose;
-//            pose.translation(cv::Vec3f(b.top));
-//            window3D.setWidgetPose(b.id, pose);
-//        }
-//        window3D.spinOnce(1, true);
-
+#ifdef VIS3D
+        for (auto& b : boxes) {
+            cv::Point3f pos = cv::Vec3f(b.top);
+            if (pos == cv::Point3f()) continue;
+            cv::Affine3d pose;
+            pose.translation(cv::Vec3f(b.top));
+            window3D.setWidgetPose(b.id, pose);
+        }
+        camera_w.setPose(transformation);
+        window3D.spinOnce(1, true);
+#endif
 
         listener.release(frames);
 /*
