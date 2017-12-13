@@ -1,5 +1,6 @@
 #include <iostream>
 #include <thread>
+#include <algorithm>
 
 #include <libfreenect2/libfreenect2.hpp>
 #include <libfreenect2/frame_listener_impl.h>
@@ -11,7 +12,8 @@
 
 #include "server.h"
 
-//# define M_PI           3.14159265358979323846  /* pi */
+# define TABLE_WIDTH 0.946
+# define TABLE_LENGTH 1.562
 
 #define VIS3D
 //#define VIS2D
@@ -32,7 +34,7 @@ cv::RNG rng(2345);
 struct TrackingBox {
 
     TrackingBox(string id, float minX, float maxX, float minY, float maxY, float minZ, float maxZ) :
-            id(id), minX(minX), maxX(maxX), minY(minY), maxY(maxY), minZ(minZ), maxZ(maxZ) { }
+            id(id), minX(minX), maxX(maxX), minY(minY), maxY(maxY), minZ(minZ), maxZ(maxZ) {}
 
     bool isInside(cv::Point3f& p) {
         return (p.x > minX && p.x < maxX &&
@@ -42,9 +44,6 @@ struct TrackingBox {
 
     bool checkAndInsert(cv::Point3f& p) {
         if (isInside(p)) {
-            if (p.y > top.y) {
-                top = p;
-            }
             points.push_back(p);
             return true;
         }
@@ -56,17 +55,38 @@ struct TrackingBox {
         points.clear();
     }
 
-    void refine(float topRange = 0.05f) {
-        float thresh = top.y - topRange;
-        cv::Point3f sum;
-        int cnt = 0;
-        for (auto& p : points) {
-            if (p.y > thresh) {
-                sum += p;
-                cnt++;
-            }
+    static bool comparePoints(cv::Point3f p0, cv::Point3f p1) {
+        return (p0.z < p1.z);
+    }
+
+    void sort() {
+        ::sort(points.begin(), points.end(), comparePoints);
+    }
+
+    cv::Point3f computePosition(int averageCnt) {
+
+        if (points.size() < averageCnt) {
+            top = cv::Point3f();
+            return top;
         }
-        top = sum / cnt;
+
+        vector<cv::Point3f> topPoints(points.end() - averageCnt, points.end());
+
+        cv::Mat covar, mean;
+        cv::Mat samples = cv::Mat(topPoints).reshape(1).t();
+        cv::calcCovarMatrix(samples, covar, mean, CV_COVAR_NORMAL | CV_COVAR_COLS);
+
+        double min, max;
+        cv::minMaxIdx(covar, &min, &max);
+
+        if (max > 0.1) {
+            top = cv::Point3f();
+            return top;
+        }
+
+        top = cv::Point3f(mean);
+
+        return top;
     }
 
     float minX, maxX, minY, maxY, minZ, maxZ;
@@ -119,6 +139,16 @@ findTransformation(cv::Mat& colorImage, cv::Mat& cameraMatrix, cv::Mat distCoeff
     vector<int> ids;
     cv::aruco::detectMarkers(tmp, dict, corners, ids);
     if (corners.size() < 4) return false;
+
+    int id0, id1, id2, id3;
+    for (int i = 0; i < ids.size(); ++i) {
+        if (ids[i] == 0) id0 = i;
+        else if (ids[i] == 1) id1 = i;
+        else if (ids[i] == 2) id2 = i;
+        else if (ids[i] == 3) id3 = i;
+        else return false;
+    }
+
     cout << "Found markers." << endl;
 
     // Flip marker points for usage in original image
@@ -133,31 +163,23 @@ findTransformation(cv::Mat& colorImage, cv::Mat& cameraMatrix, cv::Mat distCoeff
     cv::aruco::estimatePoseSingleMarkers(corners, markerLength, cameraMatrix, distCoeffs, rvecs, tvecs);
 
     // Compute center
-    cv::Vec3f center(0.0f, 0.0f, 0.0f);
+    cv::Vec3f center;
     for (auto& t: tvecs) center += t;
     center /= (float) tvecs.size();
 
     // Compute axes
     // TODO: consistent coordinate systems!
-    int id0, id1, id3;
-    for (int i = 0; i < ids.size(); ++i) {
-        if (ids[i] == 0) id0 = i;
-        else if (ids[i] == 1) id1 = i;
-        else if (ids[i] == 3) id3 = i;
-    }
     cv::Vec3f x = cv::normalize(tvecs[id1] - tvecs[id0]);
     cv::Vec3f y = cv::normalize(tvecs[id3] - tvecs[id0]);
-    cv::Vec3f z = y.cross(x);
-    x = z.cross(y);
+    cv::Vec3f z = x.cross(y);
+    x = y.cross(z); // ensure perpendicularity
 
     // Create transformation matrix
-    cv::Matx44f transform = cv::Matx44f::eye();
-    vector<cv::Vec3f> m = {z, y, x};
+    result = cv::Affine3f::Identity();
+    result = result.translate(-center);
+    vector<cv::Vec3f> m = {x, y, z};
     cv::Mat3f r(m);
-    result.rotation(cv::Matx33f((float*) r.ptr()).t());
-    result = result.rotate(cv::Vec3f(90 * M_PI / 180, 0, 0));
-    result.translation(center);
-
+    result = result.rotate(cv::Matx33f((float*) r.ptr()).t());
 
     cout << "Camera transformation:" << endl;
     cout << result.matrix << endl;
@@ -228,12 +250,6 @@ int main() {
     ColorCameraParams colorParams = dev->getColorCameraParams();
     loadCalibration(serial, colorCamMat, colorDistCoeffs); // TODO
 
-
-    Registration* registration = new Registration(depthParams, colorParams);
-    Frame undistorted(512, 424, 4);
-    Frame registered(512, 424, 4);
-    Frame depth2rgb(1920, 1080 + 2, 4);
-
     FrameMap frames;
 
 
@@ -252,15 +268,16 @@ int main() {
 
 
     vector<TrackingBox> boxes;
-    boxes.push_back({"B0", -1.5f, -0.5f, 0.0f, 2.5f, 0.0f, 1.0f});
-    boxes.push_back({"B1", -1.5f, -0.5f, 0.0f, 2.5f, -1.0f, 0.0f});
-    boxes.push_back({"B2", 0.5f, 1.5f, 0.0f, 2.5f, 0.0f, 1.0f});
-    boxes.push_back({"B3", 0.5f, 1.5f, 0.0f, 2.5f, -1.0f, 0.0f});
+    boxes.push_back({"B0", -TABLE_WIDTH / 2 - 0.4f, 0, 0.0f, TABLE_LENGTH / 2, 0.3f, 1.5f});
+    boxes.push_back({"B1", -TABLE_WIDTH / 2 - 0.4f, 0, -TABLE_LENGTH / 2, 0.0f, 0.3f, 1.5f});
+    boxes.push_back({"B2", 0, TABLE_WIDTH / 2 + 0.4f, 0.0f, TABLE_LENGTH / 2, 0.3f, 1.5f});
+    boxes.push_back({"B3", 0, TABLE_WIDTH / 2 + 0.4f, -TABLE_LENGTH / 2, 0.0f, 0.3f, 1.5f});
 
 
 #ifdef VIS3D
     cv::viz::Viz3d window3D("Viz");
-    cv::viz::WPlane table_w(cv::Point3d(0, 0, 0), cv::Vec3d(0, 0, 1), cv::Vec3d(0, 1, 0), cv::Size2d(1, 2));
+    cv::viz::WPlane table_w(cv::Point3d(0, 0, 0), cv::Vec3d(0, 0, 1), cv::Vec3d(0, 1, 0),
+                            cv::Size2d(TABLE_WIDTH, TABLE_LENGTH));
     cv::viz::WCameraPosition origin_w;
     cv::viz::WCameraPosition camera_w(cv::Vec2d(1.22, 1.04));
     cv::viz::WPlane floor_w(cv::Point3d(0, 0, -1), cv::Vec3d(0, 0, 1), cv::Vec3d(0, 1, 0), cv::Size2d(5, 5),
@@ -272,8 +289,10 @@ int main() {
     vector<cv::viz::WSphere> positions_w;
     for (auto& b: boxes) {
         cv::viz::WSphere s(cv::Point3d(0, 0, 0), 0.1, 10, cv::viz::Color(rng(255), rng(255), rng(255)));
-        window3D.showWidget(b.id, s);
+        window3D.showWidget(b.id + "_position", s);
         positions_w.push_back(s);
+        cv::viz::WCube c(cv::Point3d(b.minX, b.minY, b.minZ), cv::Point3d(b.maxX, b.maxY, b.maxZ));
+        window3D.showWidget(b.id + "_cube", c);
     }
 #endif
 
@@ -292,21 +311,27 @@ int main() {
         cv::Mat rgb;
         cv::cvtColor(colorImage, rgb, CV_RGBA2RGB);
 
+        if (!calibrated) {
+            calibrated = findTransformation(rgb, colorCamMat, colorDistCoeffs, 0.059f, transformation);
+            listener.release(frames);
+            continue;
+        }
+
+        cv::medianBlur(depthImage, depthImage, 3);
+
+        for (auto& b : boxes) b.reset();
+        transformAndSplit(depth, depthParams, transformation, 5.0f, boxes);
+
+        for (auto& b : boxes) {
+            b.sort();
+            b.computePosition(50);
+        }
+
 #ifdef VIS2D
         cv::imshow("Depth", depthImage / 4096.0f);
         cv::imshow("Color", rgb);
         cv::waitKey(1);
 #endif
-
-        if (!calibrated || true) {
-            calibrated = findTransformation(rgb, colorCamMat, colorDistCoeffs, 0.016f, transformation);
-            listener.release(frames);
-            //continue;
-        }
-
-//        for (auto& b : boxes) b.reset();
-//        transformAndSplit(depth, depthParams, transformation, 5.0f, boxes);
-//        for (auto& b : boxes) b.refine();
 
 #ifdef VIS3D
         for (auto& b : boxes) {
@@ -314,9 +339,16 @@ int main() {
             if (pos == cv::Point3f()) continue;
             cv::Affine3d pose;
             pose.translation(cv::Vec3f(b.top));
-            window3D.setWidgetPose(b.id, pose);
+            window3D.setWidgetPose(b.id + "_position", pose);
+            vector<cv::Point3f> points(1, cv::Point3f());
+            cv::viz::WCloud cloud(points);
+            if (!b.points.empty()) {
+                cloud = cv::viz::WCloud(b.points);
+            }
+            window3D.showWidget(b.id + "_cloud", cloud);
         }
         camera_w.setPose(transformation);
+
         window3D.spinOnce(1, true);
 #endif
 
@@ -335,8 +367,6 @@ int main() {
     server.stop();
     dev->stop();
     dev->close();
-
-    delete registration;
 
     return 0;
 
