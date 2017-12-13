@@ -11,6 +11,8 @@
 
 #include "server.h"
 
+//# define M_PI           3.14159265358979323846  /* pi */
+
 #define VIS3D
 //#define VIS2D
 
@@ -25,7 +27,7 @@ bool calibrated = false;
 cv::Ptr<cv::aruco::Dictionary> dict = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_50);
 cv::Mat colorCamMat;
 cv::Mat colorDistCoeffs;
-cv::RNG rng( 2345);
+cv::RNG rng(2345);
 
 struct TrackingBox {
 
@@ -105,55 +107,68 @@ void transformAndSplit(Frame* depthFrame, DepthCameraParams& params, cv::Affine3
 }
 
 bool
-findTransformation(cv::Mat& colorImage, cv::Mat& cameraMatrix, cv::Mat distCoeffs, float markerLength, cv::Affine3f& result) {
+findTransformation(cv::Mat& colorImage, cv::Mat& cameraMatrix, cv::Mat distCoeffs, float markerLength,
+                   cv::Affine3f& result) {
 
+    // Flip color image
     cv::Mat tmp;
     cv::flip(colorImage, tmp, 1);
 
     // Find markers in rgb image
-
     vector<vector<cv::Point2f>> corners;
     vector<int> ids;
-
     cv::aruco::detectMarkers(tmp, dict, corners, ids);
-
     if (corners.size() < 4) return false;
-
-    int w = colorImage.cols;
-    int h = colorImage.rows;
     cout << "Found markers." << endl;
+
+    // Flip marker points for usage in original image
     for (auto& a : corners) {
         for (auto& c: a) {
-            c.x = w-c.x;
+            c.x = colorImage.cols - c.x;
         }
     }
 
-    cv::aruco::drawDetectedMarkers(colorImage, corners, ids);
-
-
+    // Estimate marker positions in 3D
     vector<cv::Vec3d> tvecs, rvecs;
     cv::aruco::estimatePoseSingleMarkers(corners, markerLength, cameraMatrix, distCoeffs, rvecs, tvecs);
 
-    cv::Vec3f translation(0.0f,0.0f,0.0f);
-    for (auto& t: tvecs) {
-        translation += t;
+    // Compute center
+    cv::Vec3f center(0.0f, 0.0f, 0.0f);
+    for (auto& t: tvecs) center += t;
+    center /= (float) tvecs.size();
+
+    // Compute axes
+    // TODO: consistent coordinate systems!
+    int id0, id1, id3;
+    for (int i = 0; i < ids.size(); ++i) {
+        if (ids[i] == 0) id0 = i;
+        else if (ids[i] == 1) id1 = i;
+        else if (ids[i] == 3) id3 = i;
     }
-    translation /= (float) tvecs.size();
+    cv::Vec3f x = cv::normalize(tvecs[id1] - tvecs[id0]);
+    cv::Vec3f y = cv::normalize(tvecs[id3] - tvecs[id0]);
+    cv::Vec3f z = y.cross(x);
+    x = z.cross(y);
 
+    // Create transformation matrix
+    cv::Matx44f transform = cv::Matx44f::eye();
+    vector<cv::Vec3f> m = {z, y, x};
+    cv::Mat3f r(m);
+    result.rotation(cv::Matx33f((float*) r.ptr()).t());
+    result = result.rotate(cv::Vec3f(90 * M_PI / 180, 0, 0));
+    result.translation(center);
 
-    cv::aruco::drawAxis(colorImage, cameraMatrix, distCoeffs, rvecs[0], translation, 0.1f);
-
-#ifdef VIS2D
-   cv::imshow("markers", colorImage);
-#endif
-
-    // TODO: average rotations?
-
-    result.rotation(rvecs[0]);
-    result.translation(translation);
 
     cout << "Camera transformation:" << endl;
     cout << result.matrix << endl;
+
+#ifdef VIS2D
+    cv::aruco::drawDetectedMarkers(colorImage, corners, ids);
+    cv::Vec3f rvec;
+    cv::Rodrigues(result.rotation(), rvec);
+    cv::aruco::drawAxis(colorImage, cameraMatrix, distCoeffs, rvec, center, 0.1f);
+    cv::imshow("markers", colorImage);
+#endif
 
     return true;
 }
@@ -245,10 +260,11 @@ int main() {
 
 #ifdef VIS3D
     cv::viz::Viz3d window3D("Viz");
-    cv::viz::WPlane table_w(cv::Point3d(0, 0, 0), cv::Vec3d(0, 1, 0), cv::Vec3d(0, 0, 1), cv::Size2d(1, 2));
+    cv::viz::WPlane table_w(cv::Point3d(0, 0, 0), cv::Vec3d(0, 0, 1), cv::Vec3d(0, 1, 0), cv::Size2d(1, 2));
     cv::viz::WCameraPosition origin_w;
     cv::viz::WCameraPosition camera_w(cv::Vec2d(1.22, 1.04));
-    cv::viz::WPlane floor_w(cv::Point3d(0, -1, 0), cv::Vec3d(0, 1, 0), cv::Vec3d(0, 0, 1), cv::Size2d(5, 5), cv::viz::Color::gray());
+    cv::viz::WPlane floor_w(cv::Point3d(0, 0, -1), cv::Vec3d(0, 0, 1), cv::Vec3d(0, 1, 0), cv::Size2d(5, 5),
+                            cv::viz::Color::gray());
     window3D.showWidget("table", table_w);
     window3D.showWidget("floor", floor_w);
     window3D.showWidget("origin", origin_w);
@@ -278,20 +294,19 @@ int main() {
 
 #ifdef VIS2D
         cv::imshow("Depth", depthImage / 4096.0f);
+        cv::imshow("Color", rgb);
         cv::waitKey(1);
 #endif
 
-        if (!calibrated) {
+        if (!calibrated || true) {
             calibrated = findTransformation(rgb, colorCamMat, colorDistCoeffs, 0.016f, transformation);
             listener.release(frames);
-            continue;
+            //continue;
         }
 
-        for (auto& b : boxes) b.reset();
-
-        transformAndSplit(depth, depthParams, transformation, 5.0f, boxes);
-
-        for (auto& b : boxes) b.refine();
+//        for (auto& b : boxes) b.reset();
+//        transformAndSplit(depth, depthParams, transformation, 5.0f, boxes);
+//        for (auto& b : boxes) b.refine();
 
 #ifdef VIS3D
         for (auto& b : boxes) {
