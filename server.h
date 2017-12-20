@@ -7,7 +7,7 @@
 class Server {
 
 public:
-    Server(int port = 8000);
+    Server(int port = 5005);
     ~Server();
 
     void start();

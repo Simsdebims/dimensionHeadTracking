@@ -16,7 +16,7 @@
 # define TABLE_LENGTH 1.562
 
 #define VIS3D
-//#define VIS2D
+#define VIS2D
 
 using namespace std;
 using namespace libfreenect2;
@@ -192,6 +192,10 @@ findTransformation(cv::Mat& colorImage, cv::Mat& cameraMatrix, cv::Mat distCoeff
     cv::imshow("markers", colorImage);
 #endif
 
+    cv::FileStorage fs("currentCameraTransformation.yaml", cv::FileStorage::WRITE);
+    fs << "cameraTransformation" << cv::Mat(result.matrix);
+    fs.release();
+
     return true;
 }
 
@@ -201,11 +205,11 @@ void siginthandler(int s) {
 }
 
 void loadCalibration(string serial, cv::Mat& cameraMat, cv::Mat& distCoeffs) {
-    string filenName = "calib_data/" + serial + "/calib_color.yaml";
-    cv::FileStorage fs(filenName, cv::FileStorage::READ);
+    string fileName = "calib_data/" + serial + "/calib_color.yaml";
+    cv::FileStorage fs(fileName, cv::FileStorage::READ);
 
     if (!fs.isOpened()) {
-        cerr << "Could not open calibration file " << filenName << endl;
+        cerr << "Could not open calibration file " << fileName << endl;
         return;
     }
 
@@ -215,7 +219,26 @@ void loadCalibration(string serial, cv::Mat& cameraMat, cv::Mat& distCoeffs) {
     fs.release();
 }
 
-int main() {
+int main(int argc, char* argv[]) {
+
+    cv::Affine3f transformation = cv::Affine3f::Identity();
+
+    if (argc > 1) {
+        string fileName = argv[1];
+        cv::FileStorage fs(fileName, cv::FileStorage::READ);
+
+        if (!fs.isOpened()) {
+            cerr << "Could not open camera transformation file " << fileName << endl;
+            return 1;
+        }
+
+        cv::Mat tmp;
+        fs["cameraTransformation"] >> tmp;
+        transformation.matrix = tmp;
+        fs.release();
+        cout << "Loaded camera transformation from " << fileName << endl;
+        calibrated = true;
+    }
 
     Freenect2 freenect2;
     Freenect2Device* dev = 0;
@@ -251,17 +274,6 @@ int main() {
     loadCalibration(serial, colorCamMat, colorDistCoeffs); // TODO
 
     FrameMap frames;
-
-
-    float angle = (45.0f * 3.14159265f) / 180.0f;
-    float r[3][3] =
-            {
-                    {1, 0,           0},
-                    {0, cos(angle),  sin(angle)},
-                    {0, -sin(angle), cos(angle)}
-            };
-    cv::Mat m(3, 3, CV_32FC1, r);
-    cv::Affine3f transformation = cv::Affine3f::Identity();
 
     Server server;
     server.start();
@@ -311,6 +323,12 @@ int main() {
         cv::Mat rgb;
         cv::cvtColor(colorImage, rgb, CV_RGBA2RGB);
 
+#ifdef VIS2D
+        cv::imshow("Depth", depthImage / 4096.0f);
+        cv::imshow("Color", rgb);
+        cv::waitKey(1);
+#endif
+
         if (!calibrated) {
             calibrated = findTransformation(rgb, colorCamMat, colorDistCoeffs, 0.059f, transformation);
             listener.release(frames);
@@ -327,11 +345,6 @@ int main() {
             b.computePosition(50);
         }
 
-#ifdef VIS2D
-        cv::imshow("Depth", depthImage / 4096.0f);
-        cv::imshow("Color", rgb);
-        cv::waitKey(1);
-#endif
 
 #ifdef VIS3D
         for (auto& b : boxes) {
@@ -353,14 +366,14 @@ int main() {
 #endif
 
         listener.release(frames);
-/*
+
         vector<vector<float>> trackingData;
         for (size_t i = 0; i < boxes.size(); ++i) {
             vector<float> v = {(float) i, boxes[i].top.x, boxes[i].top.y, boxes[i].top.z};
             trackingData.push_back(v);
         }
         server.send(trackingData);
- */
+
 
     }
 
