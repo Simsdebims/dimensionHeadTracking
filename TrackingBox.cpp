@@ -7,7 +7,10 @@ using namespace cv;
 
 
 TrackingBox::TrackingBox(string id, float minX, float maxX, float minY, float maxY, float minZ, float maxZ) :
-        id(id), minX(minX), maxX(maxX), minY(minY), maxY(maxY), minZ(minZ), maxZ(maxZ), minCnt(40) {}
+        id(id), minX(minX), maxX(maxX), minY(minY), maxY(maxY), minZ(minZ), maxZ(maxZ), minCnt(40) {
+
+
+}
 
 bool TrackingBox::isInside(const Point3f& p) const {
     return (p.x > minX && p.x < maxX &&
@@ -64,12 +67,32 @@ Point3f TrackingBox::computePosition() {
     return top;
 }
 
+TrackingBoxList::TrackingBoxList(Affine3f transformation) : transformation(transformation) {
+
+#ifdef VIS3D
+    window3D.showWidget("table", table_w);
+    window3D.showWidget("floor", floor_w);
+    window3D.showWidget("origin", origin_w);
+    window3D.showWidget("camera", camera_w);
+    window3D.showWidget("fps", fps_w);
+#endif
+
+}
+
 void TrackingBoxList::insert(std::initializer_list<TrackingBox> list) {
     for (auto b : list) insert(b);
 }
 
 void TrackingBoxList::insert(TrackingBox b) {
     boxes.push_back(b);
+
+#ifdef VIS3D
+    viz::WSphere s(Point3d(0, 0, 0), 0.1, 10, viz::Color(rng(255), rng(255), rng(255)));
+    window3D.showWidget(b.id + "_position", s);
+    positions_w.push_back(s);
+    viz::WCube c(Point3d(b.minX, b.minY, b.minZ), Point3d(b.maxX, b.maxY, b.maxZ));
+    window3D.showWidget(b.id + "_cube", c);
+#endif
 }
 
 void TrackingBoxList::resetAll() {
@@ -98,7 +121,8 @@ Point3f unprojectPoint(float rawDepth, int u, int v, const Mat& params) {
     return Point3f(x, y, z);
 }
 
-void TrackingBoxList::fill(const uchar* depthFrame, const Mat& cameraMatrix, const Affine3f& transformation, float zThresh) {
+void
+TrackingBoxList::fill(const uchar* depthFrame, const Mat& cameraMatrix, float zThresh) {
 
     float thresh = zThresh * 1000.0f;
 
@@ -146,5 +170,34 @@ vector<vector<float>> TrackingBoxList::getTrackingData() const {
     }
     return trackingData;
 }
+
+#ifdef VIS3D
+
+void TrackingBoxList::visualize() {
+
+    float fps = 1.0f / (float(clock() - time) / CLOCKS_PER_SEC);
+    fps_w.setText(to_string(fps));
+
+    for (auto& b : boxes) {
+        Point3f pos = Vec3f(b.top);
+        if (pos == Point3f()) continue;
+        Affine3d pose;
+        pose.translation(Vec3f(b.top));
+        window3D.setWidgetPose(b.id + "_position", pose);
+        vector<Point3f> points(1, Point3f());
+        viz::WCloud cloud(points);
+        if (!b.points.empty()) {
+            cloud = viz::WCloud(b.points);
+        }
+        window3D.showWidget(b.id + "_cloud", cloud);
+    }
+    camera_w.setPose(transformation);
+
+    window3D.spinOnce(1, true);
+
+    time = clock();
+}
+
+#endif
 
 

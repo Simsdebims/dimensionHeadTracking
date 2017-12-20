@@ -8,10 +8,6 @@
 #include "Server.h"
 #include "TrackingBox.h"
 
-# define TABLE_WIDTH 0.946f
-# define TABLE_LENGTH 1.562f
-
-#define VIS3D
 //#define VIS2D
 
 using namespace std;
@@ -24,7 +20,6 @@ Ptr<aruco::Dictionary> dict = aruco::getPredefinedDictionary(aruco::DICT_4X4_50)
 Mat colorCamMat;
 Mat depthCamMat;
 Mat colorDistCoeffs;
-RNG rng(2345);
 
 bool findTransformation(Mat& colorImage, Mat& cameraMatrix, Mat& distCoeffs, float markerLength, Affine3f& result) {
 
@@ -184,34 +179,11 @@ int main(int argc, char* argv[]) {
     Server server;
     server.start();
 
-    TrackingBoxList boxes;
+    TrackingBoxList boxes(transformation);
     boxes.insert({"B0", -TABLE_WIDTH / 2 - 0.4f, 0, 0.0f, TABLE_LENGTH / 2, 0.3f, 1.5f});
     boxes.insert({"B1", -TABLE_WIDTH / 2 - 0.4f, 0, -TABLE_LENGTH / 2, 0.0f, 0.3f, 1.5f});
     boxes.insert({"B2", 0, TABLE_WIDTH / 2 + 0.4f, 0.0f, TABLE_LENGTH / 2, 0.3f, 1.5f});
     boxes.insert({"B3", 0, TABLE_WIDTH / 2 + 0.4f, -TABLE_LENGTH / 2, 0.0f, 0.3f, 1.5f});
-
-
-#ifdef VIS3D
-    viz::Viz3d window3D("Viz");
-    viz::WPlane table_w(Point3d(0, 0, 0), Vec3d(0, 0, 1), Vec3d(0, 1, 0),
-                        Size2d(TABLE_WIDTH, TABLE_LENGTH));
-    viz::WCameraPosition origin_w;
-    viz::WCameraPosition camera_w(Vec2d(1.22, 1.04));
-    viz::WPlane floor_w(Point3d(0, 0, -1), Vec3d(0, 0, 1), Vec3d(0, 1, 0), Size2d(5, 5),
-                        viz::Color::gray());
-    window3D.showWidget("table", table_w);
-    window3D.showWidget("floor", floor_w);
-    window3D.showWidget("origin", origin_w);
-    window3D.showWidget("camera", camera_w);
-    vector<viz::WSphere> positions_w;
-    for (auto& b: boxes.boxes) {
-        viz::WSphere s(Point3d(0, 0, 0), 0.1, 10, viz::Color(rng(255), rng(255), rng(255)));
-        window3D.showWidget(b.id + "_position", s);
-        positions_w.push_back(s);
-        viz::WCube c(Point3d(b.minX, b.minY, b.minZ), Point3d(b.maxX, b.maxY, b.maxZ));
-        window3D.showWidget(b.id + "_cube", c);
-    }
-#endif
 
     signal(SIGINT, siginthandler);
 
@@ -243,27 +215,11 @@ int main(int argc, char* argv[]) {
         medianBlur(depthImage, depthImage, 3);
 
         boxes.resetAll();
-        boxes.fill(depth->data, depthCamMat, transformation);
+        boxes.fill(depth->data, depthCamMat);
         boxes.computePositions();
 
-
 #ifdef VIS3D
-        for (auto& b : boxes.boxes) {
-            Point3f pos = Vec3f(b.top);
-            if (pos == Point3f()) continue;
-            Affine3d pose;
-            pose.translation(Vec3f(b.top));
-            window3D.setWidgetPose(b.id + "_position", pose);
-            vector<Point3f> points(1, Point3f());
-            viz::WCloud cloud(points);
-            if (!b.points.empty()) {
-                cloud = viz::WCloud(b.points);
-            }
-            window3D.showWidget(b.id + "_cloud", cloud);
-        }
-        camera_w.setPose(transformation);
-
-        window3D.spinOnce(1, true);
+        boxes.visualize();
 #endif
 
         listener.release(frames);
