@@ -244,7 +244,6 @@ int main(int argc, char* argv[]) {
 
         boxes.resetAll();
         boxes.fill(depth->data, depthCamMat, transformation);
-        boxes.sortAll();
         boxes.computePositions();
 
 

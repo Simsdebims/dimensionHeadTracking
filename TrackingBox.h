@@ -8,22 +8,26 @@ public:
 
     TrackingBox(std::string id, float minX, float maxX, float minY, float maxY, float minZ, float maxZ);
 
-    bool isInside(cv::Point3f& p);
+    bool isInside(const cv::Point3f& p) const;
 
-    bool checkAndInsert(cv::Point3f& p);
+    bool checkAndInsert(const cv::Point3f& p);
 
     void reset();
 
-    static bool comparePoints(cv::Point3f p0, cv::Point3f p1);
+    static bool comparePoints(const cv::Point3f& p0, const cv::Point3f& p1);
 
-    void sort();
-
-    cv::Point3f computePosition(int averageCnt);
+    cv::Point3f computePosition();
 
     float minX, maxX, minY, maxY, minZ, maxZ;
     cv::Point3f top;
     std::vector<cv::Point3f> points;
     std::string id;
+
+private:
+
+    void sort();
+
+    int minCnt;
 };
 
 class TrackingBoxList {
@@ -36,13 +40,11 @@ public:
 
     void resetAll();
 
-    void sortAll();
+    void computePositions();
 
-    void computePositions(int averageCnt = 50);
+    void fill(const uchar* depthFrame, const cv::Mat& cameraMatrix, const cv::Affine3f& transformation, float zThresh = 5.0f);
 
-    void fill(const uchar* depthFrame, cv::Mat cameraMatrix, cv::Affine3f transformation, float zThresh = 5.0f);
-
-    std::vector<std::vector<float>> getTrackingData();
+    std::vector<std::vector<float>> getTrackingData() const;
 
     std::vector<TrackingBox> boxes;
 
