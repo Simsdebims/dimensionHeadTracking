@@ -102,9 +102,10 @@ Server::~Server() {
 void Server::start() {
     auto run = [&]() {
         while (running) {
-            lws_service(context, /* timeout_ms = */ 1000000);
+            lws_service(context, /* timeout_ms = */ 1000);
         }
         lws_context_destroy(context);
+
     };
 
     running = true;
@@ -114,7 +115,7 @@ void Server::start() {
 
 void Server::stop() {
     running = false;
-    //t.join();
+    t.join();
 }
 
 void Server::send(std::vector<std::vector<float> > data) {

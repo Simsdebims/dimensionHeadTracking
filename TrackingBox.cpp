@@ -31,7 +31,7 @@ bool TrackingBox::comparePoints(Point3f p0, Point3f p1) {
 }
 
 void TrackingBox::sort() {
-    ::sort(points.begin(), points.end(), comparePoints);
+    std::sort(points.begin(), points.end(), comparePoints);
 }
 
 Point3f TrackingBox::computePosition(int averageCnt) {
@@ -88,10 +88,10 @@ void TrackingBoxList::computePositions(int averageCnt) {
 
 Point3f unprojectPoint(float rawDepth, int u, int v, Mat& params) {
 
-    static float fx = static_cast<float>(params.at<double>(0, 0));
-    static float fy = static_cast<float>(params.at<double>(1, 1));
-    static float cx = static_cast<float>(params.at<double>(0, 2));
-    static float cy = static_cast<float>(params.at<double>(1, 2));
+    static auto fx = static_cast<float>(params.at<double>(0, 0));
+    static auto fy = static_cast<float>(params.at<double>(1, 1));
+    static auto cx = static_cast<float>(params.at<double>(0, 2));
+    static auto cy = static_cast<float>(params.at<double>(1, 2));
 
     float z = rawDepth / 1000.0f;
     float x = z * (u - cx) / fx;
@@ -107,8 +107,8 @@ void TrackingBoxList::fill(const uchar* depthFrame, Mat cameraMatrix, Affine3f t
     int width = 512;
     int height = 424;
 
-    for (size_t u = 0; u < width; ++u) {
-        for (size_t v = 0; v < height; ++v) {
+    for (int u = 0; u < width; ++u) {
+        for (int v = 0; v < height; ++v) {
             float d = ((float*) depthFrame)[u + v * width];
 
             if (d > 0.0f && d < thresh) {

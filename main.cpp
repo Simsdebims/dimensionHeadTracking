@@ -12,7 +12,7 @@
 # define TABLE_LENGTH 1.562f
 
 #define VIS3D
-#define VIS2D
+//#define VIS2D
 
 using namespace std;
 using namespace cv;
@@ -164,9 +164,7 @@ int main(int argc, char* argv[]) {
 
     string serial = freenect2.getDefaultDeviceSerialNumber();
 
-    PacketPipeline* pipeline = 0;
-
-    pipeline = new libfreenect2::CudaPacketPipeline;
+    PacketPipeline* pipeline = new libfreenect2::CudaPacketPipeline;
 
     dev = freenect2.openDevice(serial, pipeline);
 
@@ -276,6 +274,7 @@ int main(int argc, char* argv[]) {
     }
 
     server.stop();
+
     dev->stop();
     dev->close();
 
