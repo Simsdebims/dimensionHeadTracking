@@ -10,7 +10,7 @@ pkg_check_modules(LIB_WEBSOCKETS REQUIRED libwebsockets)
 
 include_directories(${OpenCV_INCLUDE_DIRS})
 
-set(SOURCE_FILES main.cpp server.cpp)
+set(SOURCE_FILES main.cpp Server.cpp TrackingBox.cpp)
 add_executable(dimensionHeadTracking ${SOURCE_FILES})
 
 target_link_libraries(dimensionHeadTracking ${freenect2_LIBRARIES} ${OpenCV_LIBS}  ${LIB_WEBSOCKETS_LIBRARIES})
